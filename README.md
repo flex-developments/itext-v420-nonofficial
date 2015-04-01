@@ -1,8 +1,10 @@
 # itext-v420-nonofficial
-Java - Adaptación de las librerías de iText 4.2.0. Fuente original http://itextpdf.com/
+Java - Adaptación de las librerías de iText 4.2.0. Fuente original http://itextpdf.com/.
+
+**Adaptaciones para compatibilidad con librerías de BouncyCastle versión 152 (jdk15on-152).**
 
 ## Dependencias
- * bc-jdk16on-v146-nonofficial v020
+ * bc-jdk15on-152-nonofficial v010
    * javax.mail  (https://java.net/projects/javamail/pages/Home)
 
 ## Copyright (C) - iText Software Corp

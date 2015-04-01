@@ -66,7 +66,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import com.itextpdf.text.error_messages.MessageLocalization;
-
 import com.itextpdf.text.Chunk;
 import com.itextpdf.text.DocumentException;
 import com.itextpdf.text.Element;
@@ -117,9 +116,9 @@ public class PdfSignatureAppearance {
     private static final float MARGIN = 2;
     private Rectangle rect;
     private Rectangle pageRect;
-    private PdfTemplate app[] = new PdfTemplate[5];
+    private final PdfTemplate app[] = new PdfTemplate[5];
     private PdfTemplate frm; 
-    private PdfStamperImp writer;
+    private final PdfStamperImp writer;
     private String layer2Text;
     private String reason;
     private String location;
@@ -128,8 +127,7 @@ public class PdfSignatureAppearance {
     private int page = 1;
     private String fieldName;
     private PrivateKey privKey;
-    private Certificate[] certChain;
-    private CRL[] crlList;
+    private CRL crl;
     private PdfName filter;
     private boolean newField;
     private ByteBuffer sigout;
@@ -147,7 +145,12 @@ public class PdfSignatureAppearance {
     private byte externalRSAdata[];
     private String digestEncryptionAlgorithm;
     private HashMap exclusionLocations;
-        
+
+//OJO... Modificacion de flopez--------------------------------------------------
+    //private Certificate[] certChain;
+    private X509Certificate certificate;
+//******************************************************************************
+    
     PdfSignatureAppearance(PdfStamperImp writer) {
         this.writer = writer;
         signDate = new GregorianCalendar();
@@ -248,16 +251,22 @@ public class PdfSignatureAppearance {
     /**
      * Sets the cryptographic parameters.
      * @param privKey the private key
-     * @param certChain the certificate chain
-     * @param crlList the certificate revocation list. It may be <CODE>null</CODE>
-     * @param filter the crytographic filter type. It can be SELF_SIGNED, VERISIGN_SIGNED or WINCER_SIGNED
+     * @param certificate the certificate
+     * @param crl the certificate revocation list. It may be <CODE>null</CODE>
+     * @param filter the cryptographic filter type. It can be SELF_SIGNED, VERISIGN_SIGNED or WINCER_SIGNED
      */    
-    public void setCrypto(PrivateKey privKey, Certificate[] certChain, CRL[] crlList, PdfName filter) {
+    public void setCrypto(PrivateKey privKey, X509Certificate certificate, CRL crl, PdfName filter) {
         this.privKey = privKey;
-        this.certChain = certChain;
-        this.crlList = crlList;
+        this.certificate = certificate;
+        this.crl = crl;
         this.filter = filter;
     }
+    
+//OJO... Modificacion de flopez-------------------------------------------------
+    public void setVisibleSignature(Rectangle pageRect, int page) {
+        setVisibleSignature(pageRect, page, getNewSigName());
+    }
+//******************************************************************************
     
     /**
      * Sets the signature to be visible. It creates a new visible signature field.
@@ -275,8 +284,11 @@ public class PdfSignatureAppearance {
                 throw new IllegalArgumentException(MessageLocalization.getComposedMessage("the.field.1.already.exists", fieldName));
             this.fieldName = fieldName;
         }
-        if (page < 1 || page > writer.reader.getNumberOfPages())
+//OJO... Modificacion de flopez--------------------------------------------------
+        //if (page < 1 || page > writer.reader.getNumberOfPages())
+        if (page < 0 || page > writer.reader.getNumberOfPages())
             throw new IllegalArgumentException(MessageLocalization.getComposedMessage("invalid.page.number.1", page));
+//******************************************************************************
         this.pageRect = new Rectangle(pageRect);
         this.pageRect.normalize();
         rect = new Rectangle(this.pageRect.getWidth(), this.pageRect.getHeight());
@@ -304,7 +316,7 @@ public class PdfSignatureAppearance {
         float ury = r.getAsNumber(3).floatValue();
         pageRect = new Rectangle(llx, lly, urx, ury);
         pageRect.normalize();
-        page = item.getPage(0).intValue();
+        page = item.getPage(0);
         int rotation = writer.reader.getPageRotation(page);
         Rectangle pageSize = writer.reader.getPageSizeWithRotation(page);
         switch (rotation) {
@@ -401,8 +413,8 @@ public class PdfSignatureAppearance {
         if (app[2] == null) {
             String text;
             if (layer2Text == null) {
-                StringBuffer buf = new StringBuffer();
-                buf.append("Digitally signed by ").append(PdfPKCS7.getSubjectFields((X509Certificate)certChain[0]).getField("CN")).append('\n');
+                StringBuilder buf = new StringBuilder();
+                buf.append("Digitally signed by ").append(PdfPKCS7.getSubjectFields(certificate).getField("CN")).append('\n');
                 SimpleDateFormat sd = new SimpleDateFormat("yyyy.MM.dd HH:mm:ss z");
                 buf.append("Date: ").append(sd.format(signDate.getTime()));
                 if (reason != null)
@@ -477,7 +489,7 @@ public class PdfSignatureAppearance {
             }
 
             if (render == SignatureRenderNameAndDescription) {
-                String signedBy = PdfPKCS7.getSubjectFields((X509Certificate)certChain[0]).getField("CN");
+                String signedBy = PdfPKCS7.getSubjectFields(certificate).getField("CN");
                 Rectangle sr2 = new Rectangle(signatureRect.getWidth() - MARGIN, signatureRect.getHeight() - MARGIN );
                 float signedSize = fitText(font, signedBy, sr2, -1, runDirection);
 
@@ -715,19 +727,11 @@ public class PdfSignatureAppearance {
     }
     
     /**
-     * Gets the certificate chain.
-     * @return the certificate chain
-     */    
-    public java.security.cert.Certificate[] getCertChain() {
-        return this.certChain;
-    }
-    
-    /**
      * Gets the certificate revocation list.
      * @return the certificate revocation list
      */    
-    public java.security.cert.CRL[] getCrlList() {
-        return this.crlList;
+    public java.security.cert.CRL getCrl() {
+        return this.crl;
     }
     
     /**
@@ -819,7 +823,7 @@ public class PdfSignatureAppearance {
      * Gets a new signature fied name that doesn't clash with any existing name.
      * @return a new signature fied name
      */    
-    public String getNewSigName() {
+    public final String getNewSigName() {
         AcroFields af = writer.getAcroFields();
         String name = "Signature";
         int step = 0;
@@ -903,10 +907,30 @@ public class PdfSignatureAppearance {
             sigField.setFlags(PdfAnnotation.FLAGS_PRINT | PdfAnnotation.FLAGS_LOCKED);
 
             int pagen = getPage();
-            if (!isInvisible())
+//OJO... Modificacion de flopez-----------------------------------------------------
+//            if (!isInvisible())
+//                sigField.setWidget(getPageRect(), null);
+//            else
+//                sigField.setWidget(new Rectangle(0, 0), null);
+            if ((!isInvisible())&&(pagen==0)) { //Si pagina en cero tonces firma en todas las paginas
+                int pages = writer.reader.getNumberOfPages();
+                for (int i = 1; i <= pages; i++) {
+                    PdfFormField field = PdfFormField.createEmpty(writer);
+                    this.page = i;
+                    pagen= i;
+                    field.setWidget(getPageRect(), null);
+                    field.setAppearance(PdfAnnotation.APPEARANCE_NORMAL, getAppearance());
+                    field.setPlaceInPage(i);
+                    field.setPage(i);
+                    field.setFlags(PdfAnnotation.FLAGS_PRINT);
+                    sigField.addKid(field);
+                    field = null;
+                }
+            } else if (!isInvisible()) //Si es una pagina especifica
                 sigField.setWidget(getPageRect(), null);
             else
                 sigField.setWidget(new Rectangle(0, 0), null);
+//******************************************************************************
             sigField.setAppearance(PdfAnnotation.APPEARANCE_NORMAL, getAppearance());
             sigField.setPage(pagen);
             writer.addAnnotation(sigField, pagen);
@@ -930,7 +954,18 @@ public class PdfSignatureAppearance {
             if (getContact() != null)
                 sigStandard.setContact(getContact());
             sigStandard.put(PdfName.M, new PdfDate(getSignDate()));
-            sigStandard.setSignInfo(getPrivKey(), getCertChain(), getCrlList());
+            
+//OJO... Modificacion de flopez--------------------------------------------------
+            //sigStandard.setSignInfo(getPrivKey(), getCertChain(), getCrlList());
+            Certificate[] certChain = new Certificate[1];
+            certChain[0] = this.certificate;
+            CRL[] crlList = null;
+            if(crl==null) {
+                crlList = new CRL[1];
+                crlList[0] = this.crl;
+            }
+            sigStandard.setSignInfo(getPrivKey(), certChain, crlList);
+//******************************************************************************
             PdfString contents = (PdfString)sigStandard.get(PdfName.CONTENTS);
             PdfLiteral lit = new PdfLiteral((contents.toString().length() + (PdfName.ADOBE_PPKLITE.equals(getFilter())?0:64)) * 2 + 2);
             exclusionLocations.put(PdfName.CONTENTS, lit);
@@ -953,7 +988,7 @@ public class PdfSignatureAppearance {
                 Map.Entry entry = (Map.Entry)it.next();
                 PdfName key = (PdfName)entry.getKey();
                 Integer v = (Integer)entry.getValue();
-                lit = new PdfLiteral(v.intValue());
+                lit = new PdfLiteral(v);
                 exclusionLocations.put(key, lit);
                 cryptoDictionary.put(key, lit);
             }
@@ -999,8 +1034,8 @@ public class PdfSignatureAppearance {
         else {
             try {
                 raf = new RandomAccessFile(tempFile, "rw");
-                int boutLen = (int)raf.length();
-                range[range.length - 1] = boutLen - range[range.length - 2];
+                int boutL = (int)raf.length();
+                range[range.length - 1] = boutL - range[range.length - 2];
                 ByteBuffer bf = new ByteBuffer();
                 bf.append('[');
                 for (int k = 0; k < range.length; ++k)
@@ -1366,10 +1401,10 @@ public class PdfSignatureAppearance {
      *
      */    
     private static class RangeStream extends InputStream {
-        private byte b[] = new byte[1];
-        private RandomAccessFile raf;
-        private byte bout[];
-        private int range[];
+        private final byte b[] = new byte[1];
+        private final RandomAccessFile raf;
+        private final byte bout[];
+        private final int range[];
         private int rangePosition = 0;
         
         private RangeStream(RandomAccessFile raf, byte bout[], int range[]) {
@@ -1381,6 +1416,7 @@ public class PdfSignatureAppearance {
         /**
          * @see java.io.InputStream#read()
          */
+        @Override
         public int read() throws IOException {
             int n = read(b);
             if (n != 1)
@@ -1391,6 +1427,7 @@ public class PdfSignatureAppearance {
         /**
          * @see java.io.InputStream#read(byte[], int, int)
          */
+        @Override
         public int read(byte[] b, int off, int len) throws IOException {
             if (b == null) {
                 throw new NullPointerException();

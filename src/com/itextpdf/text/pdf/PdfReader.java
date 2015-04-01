@@ -78,9 +78,14 @@ import com.itextpdf.text.exceptions.InvalidPdfException;
 import com.itextpdf.text.exceptions.UnsupportedPdfException;
 import com.itextpdf.text.pdf.interfaces.PdfViewerPreferences;
 import com.itextpdf.text.pdf.internal.PdfViewerPreferencesImp;
+import java.security.PrivateKey;
+import java.security.cert.CertificateEncodingException;
+import org.bouncycastle.cert.X509CertificateHolder;
 
 import org.bouncycastle.cms.CMSEnvelopedData;
+import org.bouncycastle.cms.Recipient;
 import org.bouncycastle.cms.RecipientInformation;
+import org.bouncycastle.cms.jcajce.JceKeyTransEnvelopedRecipient;
 
 /** Reads a PDF document.
  * @author Paulo Soares (psoares@consiste.pt)
@@ -428,18 +433,27 @@ public class PdfReader implements PdfViewerPreferences {
     public Rectangle getBoxSize(int index, String boxName) {
         PdfDictionary page = pageRefs.getPageNRelease(index);
         PdfArray box = null;
-        if (boxName.equals("trim"))
-            box = (PdfArray)getPdfObjectRelease(page.get(PdfName.TRIMBOX));
-        else if (boxName.equals("art"))
-            box = (PdfArray)getPdfObjectRelease(page.get(PdfName.ARTBOX));
-        else if (boxName.equals("bleed"))
-            box = (PdfArray)getPdfObjectRelease(page.get(PdfName.BLEEDBOX));
-        else if (boxName.equals("crop"))
-            box = (PdfArray)getPdfObjectRelease(page.get(PdfName.CROPBOX));
-        else if (boxName.equals("media"))
-            box = (PdfArray)getPdfObjectRelease(page.get(PdfName.MEDIABOX));
-        if (box == null)
-            return null;
+//OJO... Modificacion de Felix--------------------------------------------------
+        switch (boxName) {
+            case "trim":
+                box = (PdfArray)getPdfObjectRelease(page.get(PdfName.TRIMBOX));
+                break;
+            case "art":
+                box = (PdfArray)getPdfObjectRelease(page.get(PdfName.ARTBOX));
+                break;
+            case "bleed":
+                box = (PdfArray)getPdfObjectRelease(page.get(PdfName.BLEEDBOX));
+                break;
+            case "crop":
+                box = (PdfArray)getPdfObjectRelease(page.get(PdfName.CROPBOX));
+                break;
+            case "media":
+                box = (PdfArray)getPdfObjectRelease(page.get(PdfName.MEDIABOX));
+                break;
+        }
+        if (box == null) return null;
+//******************************************************************************
+        
         return getNormalizedRectangle(box);
     }
 
@@ -707,6 +721,15 @@ public class PdfReader implements PdfViewerPreferences {
             default:
             	throw new UnsupportedPdfException(MessageLocalization.getComposedMessage("unknown.encryption.type.v.eq.1", rValue));
             }
+            
+//OJO... Modificacion de Felix--------------------------------------------------
+            X509CertificateHolder structuratedCert;
+            try {
+                structuratedCert = new X509CertificateHolder(certificate.getEncoded());
+            } catch (CertificateEncodingException | IOException f) {
+                throw new ExceptionConverter(f);
+            }
+//******************************************************************************
             for (int i = 0; i<recipients.size(); i++) {
                 PdfObject recipient = recipients.getPdfObject(i);
                 strings.remove(recipient);
@@ -714,15 +737,20 @@ public class PdfReader implements PdfViewerPreferences {
                 CMSEnvelopedData data = null;
                 try {
                     data = new CMSEnvelopedData(recipient.getBytes());
-
+                        
                     Iterator recipientCertificatesIt = data.getRecipientInfos().getRecipients().iterator();
 
                     while (recipientCertificatesIt.hasNext()) {
                         RecipientInformation recipientInfo = (RecipientInformation)recipientCertificatesIt.next();
 
-                        if (recipientInfo.getRID().match(certificate) && !foundRecipient) {
-                         envelopedData = recipientInfo.getContent(certificateKey, certificateKeyProvider);
-                         foundRecipient = true;
+                        if (recipientInfo.getRID().match(structuratedCert) && !foundRecipient) {
+//OJO... Modificacion de Felix--------------------------------------------------
+                            //envelopedData = recipientInfo.getContent(certificateKey, certificateKeyProvider);
+                            //Example from https://www.bouncycastle.org/docs/pkixdocs1.5on/org/bouncycastle/cms/CMSEnvelopedData.html
+                            Recipient rec = new JceKeyTransEnvelopedRecipient((PrivateKey) certificateKey).setProvider(certificateKeyProvider);
+                            envelopedData = recipientInfo.getContent(rec);
+//******************************************************************************
+                            foundRecipient = true;
                         }
                     }
                 }
